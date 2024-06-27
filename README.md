@@ -21,7 +21,7 @@ Note that we put the dataset under the directory .\federated-learning-master\Fol
 | CIFAR-100        | CNN (with two convolutional layers) | Image classification      |
 | EMNIST           | NN (fully connected neural network) | Digit recognition         |
 | Shakespeare      | RNN with 2 LSTM layers              | Next-character prediction |
-
+| Stackoverflow    | RNN with 1 LSTM layers              | Next-character prediction |
 <!-- mdformat on -->
 
 
