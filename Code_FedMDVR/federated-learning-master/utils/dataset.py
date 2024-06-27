@@ -7,7 +7,7 @@ from torchvision import transforms
 import torch
 from torch.utils import data
 import os
-
+os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 
 class DatasetObject:
     def __init__(self, dataset, n_client, seed, rule,  rule_arg='', data_path=''):
@@ -126,11 +126,9 @@ class DatasetObject:
             self.tst_x = tst_x
             self.tst_y = tst_y
 
-
             ###
             n_data_per_clnt = int((len(trn_y)) / self.n_client)
             clnt_data_list = [n_data_per_clnt] * self.n_client
-
 
 
             if self.rule == 'noniid':
@@ -258,12 +256,10 @@ class DatasetObject:
                 self.channels = 3; self.width = 32; self.height = 32; self.n_cls = 10;
             if self.dataset == 'CIFAR100':
                 self.channels = 3; self.width = 32; self.height = 32; self.n_cls = 100;
-            if self.dataset == 'fashion_mnist':
-                self.channels = 1; self.width = 28; self.height = 28; self.n_cls = 10;
             if self.dataset == 'emnist':
                 self.channels = 1; self.width = 28; self.height = 28; self.n_cls = 10;
 
-        '''
+
         print('Class frequencies:')
         count = 0
         for clnt in range(self.n_client):
@@ -279,7 +275,109 @@ class DatasetObject:
         print("      Test: " + 
               ', '.join(["%.3f" %np.mean(self.tst_y==cls) for cls in range(self.n_cls)]) + 
               ', Amount:%d' %self.tst_y.shape[0])
+
+
+
+def generate_syn_logistic(dimension, n_clnt, n_cls, avg_data=4, alpha=1.0, beta=0.0, theta=0.0, iid_scale=1,
+                          iid_dat=False):
+    # alpha is for minimizer of each client
+    # beta  is for distirbution of points
+    # theta is for number of data points
+
+    diagonal = np.zeros(dimension)
+    for j in range(dimension):
+        diagonal[j] = np.power((j + 1), -1.2)
+    cov_x = np.diag(diagonal)
+
+    samples_per_user = (np.random.lognormal(mean=np.log(avg_data + 1e-8), sigma=theta, size=n_clnt)).astype(int)
+    print('samples per user')
+    print(samples_per_user)
+    print('sum %d' % np.sum(samples_per_user))
+
+    data_x = list(range(n_clnt))
+    data_y = list(range(n_clnt))
+
+    B = np.random.normal(0, beta, n_clnt)
+
+    mean_x_iid = np.zeros((n_clnt, dimension))
+    mean_x = np.zeros((n_clnt, dimension))
+
+    for i in range(n_clnt):
+        mean_x[i] = np.random.normal(B[i], 1, dimension)
+
+    sol_W = np.random.normal(0, 1, (dimension, n_cls))
+    sol_B = np.random.normal(0, 1, (1, n_cls))
+
+    for i in range(n_clnt):
+
+        data_x_iid = np.random.multivariate_normal(mean_x_iid[i], cov_x, int(samples_per_user[i]*iid_scale))
+        data_x_non_iid = np.random.multivariate_normal(mean_x[i], cov_x, (samples_per_user[i]-int(samples_per_user[i]*iid_scale)))
+        data_x[i] = np.concatenate((data_x_iid, data_x_non_iid), axis=0)
+        data_y[i] = np.argmax((np.matmul(data_x[i], sol_W) + sol_B), axis=1).reshape(-1, 1)
+
+    data_x = np.asarray(data_x)
+    data_y = np.asarray(data_y)
+    return data_x, data_y
+
+
+class DatasetSynthetic:
+    def __init__(self, alpha, beta, theta, iid_scale, iid_data, n_dim, n_clnt, n_cls, avg_data, data_path, name_prefix):
+        self.dataset = 'synt'
+        self.name = name_prefix + '_'
+        self.name += '%d_%d_%d_%d_%f_%f_%f_%f_%s' % (n_dim, n_clnt, n_cls, avg_data,
+                                                     alpha, beta, theta, iid_scale, iid_data)
+
+
+
+        if (not os.path.exists('%sData/%s/' % (data_path, self.name))):
+            # Generate data
+            print('Sythetize')
+            data_x, data_y = generate_syn_logistic(dimension=n_dim, n_clnt=n_clnt, n_cls=n_cls, avg_data=avg_data,
+                                                   alpha=alpha, beta=beta, theta=theta,
+                                                   iid_scale=iid_scale, iid_dat=iid_data)
+            
+            os.makedirs('%sData/%s/' % (data_path, self.name))
+            os.makedirs('%sModel/%s/' % (data_path, self.name))
+            np.save('%sData/%s/data_x.npy' % (data_path, self.name), data_x)
+            np.save('%sData/%s/data_y.npy' % (data_path, self.name), data_y)
+        else:
+            # Load data
+            print('Load')
+            data_x = np.load('%sData/%s/data_x.npy' % (data_path, self.name))
+            data_y = np.load('%sData/%s/data_y.npy' % (data_path, self.name))
+
         '''
+        # Generate data
+        print('Sythetize')
+        data_x, data_y = generate_syn_logistic(dimension=n_dim, n_clnt=n_clnt, n_cls=n_cls, avg_data=avg_data,
+                                               alpha=alpha, beta=beta, theta=theta,
+                                               iid_scale=iid_scale, iid_dat=iid_data)
+        '''
+
+
+        for clnt in range(n_clnt):
+            print(', '.join(['%.4f' % np.mean(data_y[clnt] == t) for t in range(n_cls)]))
+
+        self.clnt_x = data_x
+        self.clnt_y = data_y
+
+        self.tst_x = np.concatenate(self.clnt_x, axis=0)
+        self.tst_y = np.concatenate(self.clnt_y, axis=0)
+        self.n_client = len(data_x)
+        print(self.clnt_x.shape)
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 # Original prepration is from LEAF paper...
@@ -479,7 +577,7 @@ class Dataset(torch.utils.data.Dataset):
     
     def __init__(self, data_x, data_y=True, train=False, dataset_name=''):
         self.name = dataset_name
-        if self.name == 'mnist' or self.name == 'emnist':
+        if self.name == 'mnist' or self.name == 'synt' or self.name == 'emnist':
             self.X_data = torch.tensor(data_x).float()
             self.y_data = data_y
             if not isinstance(data_y, bool):
@@ -508,7 +606,7 @@ class Dataset(torch.utils.data.Dataset):
         return len(self.X_data)
 
     def __getitem__(self, idx):
-        if self.name == 'mnist' or self.name == 'emnist':
+        if self.name == 'mnist'  or self.name == 'synt' or self.name == 'emnist':
             X = self.X_data[idx, :]
             if isinstance(self.y_data, bool):
                 return X
@@ -541,11 +639,25 @@ class Dataset(torch.utils.data.Dataset):
             y = self.y_data[idx]
             return x, y
 
-
+'''
 if __name__ == '__main__':
     data_path = 'Folder/' # The folder to save Data & Model
     n_client = 100
-    #data_obj = DatasetObject(dataset='CIFAR100', n_client=n_client, seed=23, rule='iid', data_path=data_path)
-    data_obj = ShakespeareObjectCrop_noniid(data_path=data_path, dataset_prefix ='dataset_prefix')
+    data_obj = DatasetObject(dataset='CIFAR100', n_client=n_client, seed=23, rule='iid', data_path=data_path)
+    #data_obj = ShakespeareObjectCrop_noniid(data_path=data_path, dataset_prefix ='dataset_prefix')
     clnt_x = data_obj.clnt_x
     clnt_y = data_obj.clnt_y
+'''
+
+if __name__ == '__main__':
+    data_path = 'D:/ICML_2022/code_icml2022/federated-learning-master/utils/Folder'  # The folder to save Data & Model
+
+    [alpha, beta, theta, iid_sol, iid_data, name_prefix] = [0.0, 10, 0.0, True , True , 'syn_alpha-1_beta-1_theta0'] #theta：the number of samples of each client
+
+    n_dim = 60
+    n_clnt= 10
+    n_cls = 5
+    avg_data = 2000
+    iid_scale = 0
+
+    data_obj = DatasetSynthetic(alpha=alpha, beta=beta, theta=theta, iid_scale=iid_scale, iid_data=iid_data, n_dim=n_dim, n_clnt=n_clnt, n_cls=n_cls, avg_data=avg_data, data_path=data_path, name_prefix=name_prefix)
